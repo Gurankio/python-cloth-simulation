@@ -6,20 +6,22 @@ from manimlib import *
 
 MASS = 0.050
 GRAVITY = 9.81
-SPRINGINESS = 0.3
+SPRINGINESS = 0.5
 REST = 1
 DELTA = 1 / 30
 
+FIXED_POINTS = [
+    (0, 3),
+]
 POINTS = [
     # x0 y0 vx0 vy0
     ((0, 0), (0, 0)),
-    ((0, 1), (0, 0)),
-    ((0, 2), (0, 0)),
+    ((1, -2), (0, 0)),
 ]
 SPRINGS = [
     # a b
+    (-1, 0),
     (0, 1),
-    (1, 2),
 ]
 
 t = sympy.symbols('t')
@@ -38,8 +40,19 @@ class Point:
         return 0.5 * MASS * (self.vx ** 2 + self.vy ** 2)
 
     def u(self):
+        return MASS * GRAVITY * self.y
+
+
+class FixedPoint:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def k(self):
         return 0
-        # return MASS * GRAVITY * self.y
+
+    def u(self):
+        return 0
 
 
 class Spring:
@@ -55,7 +68,9 @@ class Spring:
 
 
 points = [Point(i) for i in range(len(POINTS))]
-springs = [Spring(points[a], points[b]) for a, b in SPRINGS]
+fixed_points = [FixedPoint(x, y) for x, y in FIXED_POINTS]
+
+springs = [Spring(points[a] if a >= 0 else fixed_points[-a - 1], points[b] if b >= 0 else fixed_points[-b - 1]) for a, b in SPRINGS]
 
 kinetic_energy = sum(p.k() for p in points)
 potential_energy = sum(p.u() for p in points) + sum(s.u() for s in springs)
@@ -127,6 +142,10 @@ class Sim(Scene):
         axes.add_coordinate_labels(font_size=20, num_decimal_places=1)
         self.add(axes)
 
+        fixed_dots = [Dot(axes.c2p(x, y), color=BLUE) for x, y in FIXED_POINTS]
+        for dot in fixed_dots:
+            self.play(FadeIn(dot, scale=0.5))
+
         q = np.array(list(flatten([p[0] for p in POINTS])), dtype=np.float64)
         qd = np.array(list(flatten([p[1] for p in POINTS])), dtype=np.float64)
         print(q)
@@ -136,7 +155,12 @@ class Sim(Scene):
         lines = [Line(color=RED_A) for _ in SPRINGS]
 
         for i, spring in enumerate(lines):
-            f_always(spring.put_start_and_end_on, dots[SPRINGS[i][0]].get_center, dots[SPRINGS[i][1]].get_center)
+            p1, p2 = SPRINGS[i]
+            f_always(
+                spring.put_start_and_end_on,
+                (dots[p1] if p1 >= 0 else fixed_dots[-p1 - 1]).get_center,
+                (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
+            )
 
         # one by one dots
         for i, dot in enumerate(dots):
@@ -156,11 +180,5 @@ class Sim(Scene):
                     *[dot.animate.move_to(axes.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
                     run_time=DELTA
                 )
-
-                # self.play(
-                #     dot.animate.move_to(axes.c2p(x0, y0)),
-                #     hd.animate.move_to(axes.c2p(h0, 0)),
-                #     run_time=DELTA
-                # )
         except KeyboardInterrupt:
             pass
