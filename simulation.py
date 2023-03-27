@@ -179,6 +179,7 @@ class Simulation(Scene):
                 (dots[p1] if p1 >= 0 else fixed_dots[-p1 - 1]).get_center,
                 (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
             )
+            self.bring_to_back(line)
             self.play(FadeIn(line, scale=0.5), run_time=self.FADE / len(lines))
 
         try:
