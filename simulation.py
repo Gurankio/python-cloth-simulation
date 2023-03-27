@@ -172,8 +172,7 @@ class Simulation(Scene):
             self.play(FadeIn(dot, scale=0.5), run_time=self.FADE / len(dots))
 
         lines = [Line(color=RED_C) for _ in self.SPRINGS]
-        for i, line in enumerate(lines):
-            p1, p2 = self.SPRINGS[i]
+        for line, (p1, p2) in zip(lines, self.SPRINGS):
             f_always(
                 line.put_start_and_end_on,
                 (dots[p1] if p1 >= 0 else fixed_dots[-p1 - 1]).get_center,
@@ -221,3 +220,34 @@ class DoubleRope(Simulation):
     FIXED_POINTS = [(2, 8), (8, 8)]
     POINTS = [((2 + 0.2 * i, 8), (0, 0)) for i in range(1, 30)]
     SPRINGS = [(-1, 0), (28, -2)] + [(i, i + 1) for i in range(28)]
+
+
+class Cloth(Simulation):
+    MASS = 0.001
+    SPRINGINESS = 0.2
+    REST = 1
+
+    FIXED_POINTS = [
+        (2, 8),
+        (8, 8),
+    ]
+    POINTS = [
+        ((2 + i, 8 - j), (0, 0))
+        for i in range(0, 7)
+        for j in range(0, 6)
+        if (i != 0 and i != 6) or j != 0
+    ]
+    SPRINGS = [
+        (-1, 0),
+        (-1, 5),
+        (-2, 29),
+        (-2, 35),
+    ] + [
+        (i, i + 1)
+        for i in range(39)
+        if i % 6 != 4
+    ] + [
+        (i, i + 5 + (i < 30))
+        for i in range(35)
+        if i != 29
+    ]
