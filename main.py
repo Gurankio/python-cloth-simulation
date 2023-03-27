@@ -4,25 +4,30 @@ import sympy
 import numpy as np
 from manimlib import *
 
-MASS = 0.050
+MASS = 0.0005
 GRAVITY = 9.81
 SPRINGINESS = 0.5
-REST = 1
+REST = 0.2
 DELTA = 1 / 30
 
 FIXED_POINTS = [
-    (0, 3),
+    (-3, 3),
+    (3, 3),
 ]
+# x0 y0 vx0 vy0
 POINTS = [
-    # x0 y0 vx0 vy0
-    ((0, 0), (0, 0)),
-    ((1, -2), (0, 0)),
+    ((-3 + 0.2 * i, 3), (0, 0))
+    for i in range(1, 30)
 ]
+# a b
 SPRINGS = [
-    # a b
     (-1, 0),
-    (0, 1),
+    (28, -2),
+] + [
+    (i, i + 1)
+    for i in range(28)
 ]
+
 
 t = sympy.symbols('t')
 
@@ -143,8 +148,7 @@ class Sim(Scene):
         self.add(axes)
 
         fixed_dots = [Dot(axes.c2p(x, y), color=BLUE) for x, y in FIXED_POINTS]
-        for dot in fixed_dots:
-            self.play(FadeIn(dot, scale=0.5))
+        self.play(*[FadeIn(dot, scale=0.5) for dot in fixed_dots])
 
         q = np.array(list(flatten([p[0] for p in POINTS])), dtype=np.float64)
         qd = np.array(list(flatten([p[1] for p in POINTS])), dtype=np.float64)
@@ -162,19 +166,18 @@ class Sim(Scene):
                 (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
             )
 
-        # one by one dots
         for i, dot in enumerate(dots):
             dot.move_to(axes.c2p(q[i * 2], q[i * 2 + 1]))
-            self.play(FadeIn(dot, scale=0.5))
+        self.play(*[FadeIn(dot, scale=0.5) for dot in dots])
 
-        # one by one lines
-        for i, line in enumerate(lines):
-            self.play(FadeIn(line, scale=0.5))
+        self.play(*[FadeIn(line, scale=0.5) for line in lines])
 
         try:
             while True:
                 q, qd = range_kutta(q, qd, a)
                 # h0 = hamiltonian(x0, y0, vx0, vy0)
+
+                qd *= 0.995
 
                 self.play(
                     *[dot.animate.move_to(axes.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
