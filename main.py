@@ -4,30 +4,37 @@ import sympy
 import numpy as np
 from manimlib import *
 
-MASS = 0.0005
+MASS = 0.050
 GRAVITY = 9.81
 SPRINGINESS = 0.5
-REST = 0.2
+REST = 1
 DELTA = 1 / 30
 
 FIXED_POINTS = [
-    (-3, 3),
-    (3, 3),
+    (0, 3),
 ]
-# x0 y0 vx0 vy0
 POINTS = [
-    ((-3 + 0.2 * i, 3), (0, 0))
-    for i in range(1, 30)
+    # x0 y0 vx0 vy0
+    ((0, 0), (0, 0)),
+    ((0, 1), (0, 0)),
+    ((0, 2), (0, 0)),
 ]
-# a b
 SPRINGS = [
+    # a b
     (-1, 0),
-    (28, -2),
-] + [
-    (i, i + 1)
-    for i in range(28)
+    (0, 1),
 ]
 
+AXES = Axes(
+    x_range=(-5, 5, 0.5),
+    y_range=(-5, 5, 0.5),
+    height=10,
+    width=10,
+)
+AXES.add_coordinate_labels(
+    font_size=20,
+    num_decimal_places=1
+)
 
 t = sympy.symbols('t')
 
@@ -74,7 +81,6 @@ class Spring:
 
 points = [Point(i) for i in range(len(POINTS))]
 fixed_points = [FixedPoint(x, y) for x, y in FIXED_POINTS]
-
 springs = [Spring(points[a] if a >= 0 else fixed_points[-a - 1], points[b] if b >= 0 else fixed_points[-b - 1]) for a, b in SPRINGS]
 
 kinetic_energy = sum(p.k() for p in points)
@@ -127,60 +133,43 @@ def range_kutta(q, qd, a):
 
 class Sim(Scene):
     def construct(self):
-        axes = Axes(
-            # x-axis ranges from -1 to 10, with a default step size of 1
-            x_range=(-5, 5, 0.5),
-            # y-axis ranges from -2 to 2 with a step size of 0.5
-            y_range=(-5, 5, 0.5),
-            # The axes will be stretched so as to match the specified
-            # height and wiDELTAh
-            height=10,
-            wiDELTAh=10,
-            # Axes is made of two NumberLine mobjects.  You can specify
-            # their configuration with axis_config
-            axis_config={
-                "stroke_color": GREY_A,
-                "stroke_wiDELTAh": 2,
-            },
-        )
+        self.add(AXES)
 
-        axes.add_coordinate_labels(font_size=20, num_decimal_places=1)
-        self.add(axes)
-
-        fixed_dots = [Dot(axes.c2p(x, y), color=BLUE) for x, y in FIXED_POINTS]
-        self.play(*[FadeIn(dot, scale=0.5) for dot in fixed_dots])
 
         q = np.array(list(flatten([p[0] for p in POINTS])), dtype=np.float64)
         qd = np.array(list(flatten([p[1] for p in POINTS])), dtype=np.float64)
         print(q)
         print(qd)
 
+        FADE = 1
         dots = [Dot(color=RED) for _ in POINTS]
         lines = [Line(color=RED_A) for _ in SPRINGS]
 
-        for i, spring in enumerate(lines):
+        for i, dot in enumerate(dots):
+            # TODO: like below
+            dot.move_to(AXES.c2p(q[i * 2], q[i * 2 + 1]))
+            self.play(FadeIn(dot, scale=0.5), run_time=FADE / len(dots))
+
+        fixed_dots = [Dot(AXES.c2p(x, y), color=BLUE) for x, y in FIXED_POINTS]
+        for dot in fixed_dots:
+            self.play(FadeIn(dot, scale=0.5))
+
+        lines = [Line(color=RED_C) for _ in SPRINGS]
+        for i, line in enumerate(lines):
             p1, p2 = SPRINGS[i]
             f_always(
-                spring.put_start_and_end_on,
+                line.put_start_and_end_on,
                 (dots[p1] if p1 >= 0 else fixed_dots[-p1 - 1]).get_center,
                 (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
             )
-
-        for i, dot in enumerate(dots):
-            dot.move_to(axes.c2p(q[i * 2], q[i * 2 + 1]))
-        self.play(*[FadeIn(dot, scale=0.5) for dot in dots])
-
-        self.play(*[FadeIn(line, scale=0.5) for line in lines])
+            self.play(FadeIn(line, scale=0.5), run_time=FADE / len(lines))
 
         try:
             while True:
                 q, qd = range_kutta(q, qd, a)
-                # h0 = hamiltonian(x0, y0, vx0, vy0)
-
-                qd *= 0.995
 
                 self.play(
-                    *[dot.animate.move_to(axes.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
+                    *[dot.animate.move_to(AXES.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
                     run_time=DELTA
                 )
         except KeyboardInterrupt:
