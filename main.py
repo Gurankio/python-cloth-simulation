@@ -8,7 +8,7 @@ MASS = 0.050
 GRAVITY = 9.81
 SPRINGINESS = 0.3
 REST = 1
-DELTA = 1 / 1
+DELTA = 1 / 30
 
 POINTS = [
     # x0 y0 vx0 vy0
@@ -129,18 +129,23 @@ class Sim(Scene):
 
         q = np.array(list(flatten([p[0] for p in POINTS])), dtype=np.float64)
         qd = np.array(list(flatten([p[1] for p in POINTS])), dtype=np.float64)
+        print(q)
+        print(qd)
 
         dots = [Dot(color=RED) for _ in POINTS]
-        self.add(*dots)
-        # move to staring position
-        self.play(
-            *[dot.animate.move_to(axes.c2p(q[i], q[i + 1])) for i, dot in enumerate(dots)],
-            run_time=0
-        )
-        
-        # hd = Dot(color=GREEN)
-        # hd.move_to(axes.c2p(0, 0))
-        # self.play(FadeIn(hd, scale=0.5))
+        lines = [Line(color=RED_A) for _ in SPRINGS]
+
+        for i, spring in enumerate(lines):
+            f_always(spring.put_start_and_end_on, dots[SPRINGS[i][0]].get_center, dots[SPRINGS[i][1]].get_center)
+
+        # one by one dots
+        for i, dot in enumerate(dots):
+            dot.move_to(axes.c2p(q[i * 2], q[i * 2 + 1]))
+            self.play(FadeIn(dot, scale=0.5))
+
+        # one by one lines
+        for i, line in enumerate(lines):
+            self.play(FadeIn(line, scale=0.5))
 
         try:
             while True:
@@ -148,7 +153,7 @@ class Sim(Scene):
                 # h0 = hamiltonian(x0, y0, vx0, vy0)
 
                 self.play(
-                    *[dot.animate.move_to(axes.c2p(q[i], q[i + 1])) for i, dot in enumerate(dots)],
+                    *[dot.animate.move_to(axes.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
                     run_time=DELTA
                 )
 
