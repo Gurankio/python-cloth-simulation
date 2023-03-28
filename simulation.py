@@ -1,9 +1,19 @@
+import importlib
+import pathlib
+import pickle
+
+import appdirs
+import numpy
 import sympy
 from manimlib import *
 from more_itertools import flatten
 from tqdm.auto import tqdm
 
 t = sympy.symbols('t')
+
+# caching
+CACHE = pathlib.Path(appdirs.user_cache_dir('python-lagrangian-simulator'))
+CACHE.mkdir(parents=True, exist_ok=True)
 
 
 class FixedPoint:
@@ -56,9 +66,6 @@ class Spring:
         return 0.5 * self.springiness * (self.l - self.rest) ** 2
 
 
-T = TypeVar('T')
-
-
 class Simulation(Scene):
     # required
     SPRINGS = None
@@ -91,7 +98,7 @@ class Simulation(Scene):
         'points',
         'fixed_points',
         'springs',
-        'lagrangian',
+        'range_kutta',
         'hamiltonian',
     )
 
@@ -108,68 +115,127 @@ class Simulation(Scene):
         return points[index] if index >= 0 else fixed_points[-index - 1]
 
     def setup(self):
-        self.fixed_points = [FixedPoint(x, y) for x, y in self.FIXED_POINTS]
-        self.points = [Point(i, self.MASS, self.GRAVITY) for i in range(len(self.POINTS))]
-        self.springs = [Spring(self.resolve_point(a, self.points, self.fixed_points),
-                               self.resolve_point(b, self.points, self.fixed_points),
-                               self.SPRINGINESS, self.REST)
-                        for a, b in self.SPRINGS]
+        data = pickle.dumps((self.FIXED_POINTS,
+                             self.POINTS, self.MASS, self.GRAVITY,
+                             self.SPRINGS, self.SPRINGINESS, self.REST))
+        data_hash = hashlib.blake2b(data, person="simulator-v1".encode('utf-8'))
+        cache_file = CACHE / f'generated_{data_hash.hexdigest()}.py'
 
-        kinetic_energy = sum(p.k() for p in self.points)
-        potential_energy = sum(p.u() for p in self.points) + sum(s.u() for s in self.springs)
+        if not cache_file.exists():
+            print(f'Generating lagrangian ({data_hash.hexdigest()})')
 
-        lagrangian = kinetic_energy - potential_energy
-        hamiltonian = kinetic_energy + potential_energy
+            self.fixed_points = [FixedPoint(x, y) for x, y in self.FIXED_POINTS]
+            self.points = [Point(i, self.MASS, self.GRAVITY) for i in range(len(self.POINTS))]
+            self.springs = [Spring(self.resolve_point(a, self.points, self.fixed_points),
+                                   self.resolve_point(b, self.points, self.fixed_points),
+                                   self.SPRINGINESS, self.REST)
+                            for a, b in self.SPRINGS]
 
-        eq_lagrangian = [
-            sympy.solve(sympy.Matrix([sympy.diff(sympy.diff(lagrangian, p.vx), t) - sympy.diff(lagrangian, p.x),
-                                      sympy.diff(sympy.diff(lagrangian, p.vy), t) - sympy.diff(lagrangian, p.y)]),
-                        [p.ax, p.ay])
-            for p in tqdm(self.points, desc='Solving Euler-Lagrange equations')
-        ]
+            kinetic_energy = sum(p.k() for p in self.points)
+            potential_energy = sum(p.u() for p in self.points) + sum(s.u() for s in self.springs)
 
-        q = list(flatten([p.x, p.y] for p in self.points))
-        qd = list(flatten([p.vx, p.vy] for p in self.points))
+            lagrangian = kinetic_energy - potential_energy
+            hamiltonian = kinetic_energy + potential_energy
 
-        lambdas = list(flatten([
-            (sympy.lambdify(q + qd, e[p.ax], 'numpy', cse=True),
-             sympy.lambdify(q + qd, e[p.ay], 'numpy', cse=True))
-            for e, p in tqdm(zip(eq_lagrangian, self.points), desc='Compiling Euler-Lagrange equations')
-        ]))
+            eq_lagrangian = [
+                sympy.solve([sympy.diff(sympy.diff(lagrangian, p.vx), t) - sympy.diff(lagrangian, p.x),
+                             sympy.diff(sympy.diff(lagrangian, p.vy), t) - sympy.diff(lagrangian, p.y)],
+                            [p.ax, p.ay])
+                for p in tqdm(self.points, desc='Solving Euler-Lagrange equations')
+            ]
 
-        self.lagrangian = lambda q, qd: np.array([lam(*q, *qd) for lam in lambdas], dtype=np.float64)
-        self.hamiltonian = sympy.lambdify(q + qd, hamiltonian, 'numpy')
+            q = list(flatten([p.x, p.y] for p in self.points))
+            qd = list(flatten([p.vx, p.vy] for p in self.points))
 
-    def range_kutta(self, q, qd):
-        k1 = qd
-        k1d = self.lagrangian(q, qd)
-        k2 = qd + 0.5 * k1d * self.DELTA
-        k2d = self.lagrangian(q + 0.5 * k1 * self.DELTA, qd + 0.5 * k1d * self.DELTA)
-        k3 = qd + 0.5 * k2d * self.DELTA
-        k3d = self.lagrangian(q + 0.5 * k2 * self.DELTA, qd + 0.5 * k2d * self.DELTA)
-        k4 = qd + k3d * self.DELTA
-        k4d = self.lagrangian(q + k3 * self.DELTA, qd + k3d * self.DELTA)
-        q += (k1 + 2 * k2 + 2 * k3 + k4) * self.DELTA / 6
-        qd += (k1d + 2 * k2d + 2 * k3d + k4d) * self.DELTA / 6
-        return q, qd
+            sources = list(flatten([
+                (inspect.getsource(sympy.lambdify(q + qd, e[p.ax], 'numpy')),
+                 inspect.getsource(sympy.lambdify(q + qd, e[p.ay], 'numpy')))
+                for e, p in tqdm(zip(eq_lagrangian, self.points),
+                                 desc='Generating source', total=len(self.points))
+            ]))
+            hamiltonian_source = inspect.getsource(sympy.lambdify(q + qd, hamiltonian, 'numpy'))
+
+            parameters_map = [
+                *flatten([f'q[{i * 2}]', f'q[{i * 2 + 1}]']
+                         for i in range(len(self.points))),
+                *flatten([f'qd[{len(self.points) + i * 2}]', f'qd[{len(self.points) + i * 2 + 1}]']
+                         for i in range(len(self.points))),
+            ]
+
+            definition = re.compile(r'def .+\((.+)\):\s+return (.+)')
+
+            def vectorize(source):
+                parameters, expr = definition.match(source).groups()
+                parameters = parameters.split(', ')
+                for j, parameter in enumerate(parameters):
+                    expr = expr.replace(parameter, parameters_map[j])
+                return f'        {expr},\n'
+
+            vectorized = ''.join([*tqdm((vectorize(source) for source in sources),
+                                        desc='Refactoring', total=len(sources))
+                                  ])
+            hamiltonian_vectorized = vectorize(hamiltonian_source)
+
+            source = f'from numpy import *\n' \
+                     f'from numba import njit\n' \
+                     f'\n' \
+                     f'@njit(fastmath=True, cache=True)\n' \
+                     f'def hamiltonian(q, qd):\n' \
+                     f'    return {hamiltonian_vectorized.removesuffix(",")}' \
+                     f'\n' \
+                     '@njit(fastmath=True, cache=True)\n' \
+                     'def range_kutta(q, qd, delta):\n' \
+                     '    k1 = qd\n' \
+                     '    k1d = f_lagrangian(q, qd)\n' \
+                     '    k2 = qd + 0.5 * k1d * delta\n' \
+                     '    k2d = f_lagrangian(q + 0.5 * k1 * delta, qd + 0.5 * k1d * delta)\n' \
+                     '    k3 = qd + 0.5 * k2d * delta\n' \
+                     '    k3d = f_lagrangian(q + 0.5 * k2 * delta, qd + 0.5 * k2d * delta)\n' \
+                     '    k4 = qd + k3d * delta\n' \
+                     '    k4d = f_lagrangian(q + k3 * delta, qd + k3d * delta)\n' \
+                     '    q += (k1 + 2 * k2 + 2 * k3 + k4) * delta / 6\n' \
+                     '    qd += (k1d + 2 * k2d + 2 * k3d + k4d) * delta / 6\n' \
+                     '    return q, qd\n' \
+                     f'\n' \
+                     f'@njit(fastmath=True, cache=True)\n' \
+                     f'def f_lagrangian(q, qd):\n' \
+                     f'    return array([\n' \
+                     f'{vectorized}' \
+                     f'    ])' \
+                     f'\n'
+
+            try:
+                cache_file.touch(exist_ok=False)
+                cache_file.write_text(source)
+            except:
+                print('Failed to save lagrangian')
+                exit(1)
+
+        print(f'Loading lagrangian ({data_hash.hexdigest()})')
+        spec = importlib.util.spec_from_file_location(cache_file.name, str(cache_file))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[cache_file.name] = mod
+        spec.loader.exec_module(mod)
+        self.range_kutta = mod.range_kutta
+        self.hamiltonian = mod.hamiltonian
 
     def construct(self):
         self.AXES.fix_in_frame()
         self.add(self.AXES)
 
-        q = np.array(list(flatten([p[0] for p in self.POINTS])), dtype=np.float64)
-        qd = np.array(list(flatten([p[1] for p in self.POINTS])), dtype=np.float64)
+        q = numpy.array(list(flatten([p[0] for p in self.POINTS])), dtype=numpy.float64)
+        qd = numpy.array(list(flatten([p[1] for p in self.POINTS])), dtype=numpy.float64)
 
         hamilton_dot = Dot(self.AXES.c2p(0, 0), color=GREEN)
+        self.add(hamilton_dot)
 
         fixed_dots = [Dot(self.AXES.c2p(x, y), color=BLUE) for x, y in self.FIXED_POINTS]
-        for dot in fixed_dots:
-            self.play(FadeIn(dot, scale=0.5), run_time=self.FADE / len(fixed_dots))
+        self.play(*(FadeIn(dot, scale=0.5) for dot in fixed_dots), run_time=self.FADE)
 
         dots = [Dot(color=RED) for _ in self.POINTS]
         for i, dot in enumerate(dots):
             dot.move_to(self.AXES.c2p(q[i * 2], q[i * 2 + 1]))
-            self.play(FadeIn(dot, scale=0.5), run_time=self.FADE / len(dots))
+        self.play(*(FadeIn(dot, scale=0.5) for dot in dots), run_time=self.FADE)
 
         lines = [Line(color=RED_C) for _ in self.SPRINGS]
         for line, (p1, p2) in zip(lines, self.SPRINGS):
@@ -179,13 +245,13 @@ class Simulation(Scene):
                 (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
             )
             self.bring_to_back(line)
-            self.play(FadeIn(line, scale=0.5), run_time=self.FADE / len(lines))
+        self.play(*(FadeIn(line, scale=0.5) for line in lines), run_time=self.FADE)
 
         try:
             while True:
-                q, qd = self.range_kutta(q, qd)
+                q, qd = self.range_kutta(q, qd, self.DELTA)
                 qd *= 1 - self.DAMPING
-                h = self.hamiltonian(*q, *qd)
+                h = self.hamiltonian(q, qd)
 
                 self.play(
                     hamilton_dot.animate.move_to(self.AXES.c2p(h, 0)),
@@ -251,3 +317,20 @@ class Cloth(Simulation):
         for i in range(35)
         if i != 29
     ]
+
+
+class Benchmark(Simulation):
+    MASS = 0.0005
+    SPRINGINESS = 0.5
+    REST = 0.2
+
+    DELTA = 1 / 10
+
+    FIXED_POINTS = [(1 + 8 / 10 * x, 10) for x in range(10)]
+    POINTS = [((1 + 8 / 10 * x, 10 - 5 / 10 * y), (0, 0))
+              for x in range(10)
+              for y in range(9)]
+    SPRINGS = [(-1 - x, x) for x in range(10)] + \
+              [(10 * y + x, 10 * (y + 1) + x) for x in range(10) for y in range(8)] + \
+              [(10 * y + x - 1, 10 * y + x) for x in range(1, 10) for y in range(8)] + \
+              [(10 * y + x, 10 * y + x + 1) for x in range(0, 9) for y in range(8)]

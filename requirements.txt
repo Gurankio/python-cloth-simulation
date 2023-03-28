@@ -1,0 +1,6 @@
+sympy~=1.11.1
+numpy==1.24.2
+manimgl
+numba
+tqdm~=4.65.0
+appdirs==1.4.4
