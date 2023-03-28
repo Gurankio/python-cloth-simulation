@@ -211,13 +211,16 @@ class Simulation(Scene):
                 print('Failed to save lagrangian')
                 exit(1)
 
-        print(f'Loading lagrangian ({data_hash.hexdigest()})')
+        print(f'Loading lagrangian, this might take a while... ({data_hash.hexdigest()})')
+        now = time.time()
         spec = importlib.util.spec_from_file_location(cache_file.name, str(cache_file))
         mod = importlib.util.module_from_spec(spec)
         sys.modules[cache_file.name] = mod
         spec.loader.exec_module(mod)
         self.range_kutta = mod.range_kutta
         self.hamiltonian = mod.hamiltonian
+        elapsed = time.time() - now
+        print(f'Lagrangian loaded successfully in {elapsed:.2f}s')
 
     def construct(self):
         self.AXES.fix_in_frame()
@@ -304,19 +307,19 @@ class Cloth(Simulation):
         if (i != 0 and i != 6) or j != 0
     ]
     SPRINGS = [
-        (-1, 0),
-        (-1, 5),
-        (-2, 29),
-        (-2, 35),
-    ] + [
-        (i, i + 1)
-        for i in range(39)
-        if i % 6 != 4
-    ] + [
-        (i, i + 5 + (i < 30))
-        for i in range(35)
-        if i != 29
-    ]
+                  (-1, 0),
+                  (-1, 5),
+                  (-2, 29),
+                  (-2, 35),
+              ] + [
+                  (i, i + 1)
+                  for i in range(39)
+                  if i % 6 != 4
+              ] + [
+                  (i, i + 5 + (i < 30))
+                  for i in range(35)
+                  if i != 29
+              ]
 
 
 class Benchmark(Simulation):
