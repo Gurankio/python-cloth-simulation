@@ -251,16 +251,24 @@ class Simulation(Scene):
         self.play(*(FadeIn(line, scale=0.5) for line in lines), run_time=self.FADE)
 
         try:
+            start_time = time.time()
             while True:
+                begin = time.time()
                 q, qd = self.range_kutta(q, qd, self.DELTA)
                 qd *= 1 - self.DAMPING
                 h = self.hamiltonian(q, qd)
+                end = time.time()
 
                 self.play(
                     hamilton_dot.animate.move_to(self.AXES.c2p(h, 0)),
                     *[dot.animate.move_to(self.AXES.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
                     run_time=self.DELTA
                 )
+
+                start_time += self.DELTA
+                computing_time = end - begin
+                delay = time.time() - start_time
+                print(f'Computing time:{1000 * computing_time:7.3f}ms | Delay:{1000 * delay:9.3f}ms')
         except KeyboardInterrupt:
             pass
 
