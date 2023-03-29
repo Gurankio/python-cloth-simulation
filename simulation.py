@@ -602,13 +602,13 @@ if __name__ == '__main__':
         'cloth': Cloth,
         'moving-cloth': MovingCloth,
         'building': Building,
-        'moving-building': MovingBuilding,
+        # 'moving-building': MovingBuilding,
     }
     if len(sys.argv) == 1:
         print("missing simulation name")
     if len(sys.argv) > 2:
         OPTIMIZED = sys.argv[2] == "--optimized"
     if sys.argv[1] == "--compile":
-        pqdm(do_compile_sim, sims.values(),
+        pqdm(do_compile_sim, sims.values(), n_jobs=multiprocessing.cpu_count(),
              desc="compiling", unit="sim", total=len(sims))
     sims[sys.argv[1]]().run()
