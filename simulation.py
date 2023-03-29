@@ -89,6 +89,10 @@ def do_solve(eq):
     return repr(sympy.solve(eq, t))
 
 
+def do_compile_sim(sim):
+    sim()
+
+
 class Simulation(abc.ABC):
     # required
     SPRINGS = None
@@ -424,7 +428,7 @@ class Building(Simulation):
 
     @classmethod
     def fixed_points(cls):
-        return [(i, 0) for i in range(11)]
+        return [(i + 3 * sympy.sin(t * sympy.atan(sympy.cos(t))) * sympy.exp(- (t / 15) ** 2), 0) for i in range(11)]
 
     @classmethod
     def points(cls):
@@ -466,7 +470,6 @@ if __name__ == '__main__':
     if len(sys.argv) > 2:
         OPTIMIZED = sys.argv[2] == "--optimized"
     if sys.argv[1] == "--compile":
-        for name, sim in sims.items():
-            print(f'Compiling: {name}')
-            sim = sim()
+        pqdm(do_compile_sim, sims.values(),
+             desc="compiling", unit="sim", total=len(sims))
     sims[sys.argv[1]]().run()
