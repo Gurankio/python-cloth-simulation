@@ -230,7 +230,7 @@ class Simulation(abc.ABC):
                f'\n' \
                f'@njit(fastmath=True, parallel=False, cache=True)\n' \
                f'def fast_hamiltonian(t, q, qd):\n' \
-               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
+               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}\n' \
                f'\n' \
                '@njit(fastmath=True, parallel=False, cache=True)\n' \
                'def fast_range_kutta(t, q, qd, delta):\n' \
@@ -253,7 +253,7 @@ class Simulation(abc.ABC):
                f'    ])\n' \
                f'\n' \
                f'def hamiltonian(t, q, qd):\n' \
-               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
+               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}\n' \
                f'\n' \
                'def range_kutta(t, q, qd, delta):\n' \
                '    k1 = qd\n' \
