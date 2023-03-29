@@ -17,6 +17,7 @@ import pqdm.threads
 import sympy
 from more_itertools import flatten
 from tqdm.auto import tqdm
+from pqdm.processes import pqdm
 
 import pygame
 
@@ -105,17 +106,17 @@ class Simulation(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def fixed_points(cls):
+    def fixed_points(cls) -> [(float, float)]:
         pass
 
     @classmethod
     @abc.abstractmethod
-    def points(cls):
+    def points(cls) -> [(float, float, float)]:
         pass
 
     @classmethod
     @abc.abstractmethod
-    def springs(cls):
+    def springs(cls) -> [(float, float, float, float)]:
         pass
 
     def __init__(self):
@@ -190,12 +191,12 @@ class Simulation(abc.ABC):
             for p in tqdm(self.points, desc='Preparing Euler-Lagrange equations')
         ]
 
-        eq_lagrangian = pqdm.threads.pqdm(eq_lagrangian_data, do_solve, multiprocessing.cpu_count(),
-                                          desc='Solving Euler-Lagrange equations', total=len(self.points))
-        eq_lagrangian = [sympy.sympify(sol) for sol in eq_lagrangian]
+        eq_lagrangian = pqdm(eq_lagrangian_data, do_solve, multiprocessing.cpu_count(),
+                             desc='Solving Euler-Lagrange equations', total=len(self.points))
 
         q = list(flatten([p.x, p.y] for p in self.points))
         qd = list(flatten([p.vx, p.vy] for p in self.points))
+
         sources = list(flatten([
             (inspect.getsource(sympy.lambdify(q + qd, e[p.ax], 'numpy')),
              inspect.getsource(sympy.lambdify(q + qd, e[p.ay], 'numpy')))
