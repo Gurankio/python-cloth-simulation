@@ -324,8 +324,8 @@ class Simulation(abc.ABC):
             for pos in self.FIXED_POINTS:
                 circle(screen, pygame.color.Color(236, 140, 40), self.transform(*resolve_fixed(tv, *pos)), 5)
 
-            for i in range(len(self.POINTS)):
-                circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), 5)
+            for i, (_, _, m) in enumerate(self.POINTS):
+                circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), (5 / 0.025 ** .5) * m ** .5 + 1)
 
             pygame.display.flip()
             clock.tick(self.FPS)
@@ -558,12 +558,13 @@ class Building(Simulation):
 class MovingBuilding(Simulation):
     SPRINGINESS = 100
     MASS = 0.05
+    DAMPING = 0.01
 
     H = 8
 
     @classmethod
     def fixed_points(cls):
-        return [(i + 3 * sympy.sin(t * sympy.atan(sympy.cos(t))), 0) for i in range(11)]
+        return [(i + 3 * sympy.sin(10 * sympy.atan(sympy.cos(t - 10))) * sympy.exp(-((t - 10) / 5) ** 2), 0) for i in range(11)]
 
     @classmethod
     def points(cls):
@@ -571,6 +572,8 @@ class MovingBuilding(Simulation):
             ((i, j), (0, 0), cls.MASS / j)
             for i in range(3, 8)
             for j in range(1, cls.H)
+        ] + [
+            ((5, 6), (0, 0), cls.MASS * 8)
         ]
 
     @classmethod
@@ -587,9 +590,11 @@ class MovingBuilding(Simulation):
             for i in range(4)
         ] + [
             (i, j, cls.SPRINGINESS, d)
-            for i, (a, _, _) in enumerate(points)
-            for j, (b, _, _) in enumerate(points)
+            for i, (a, _, _) in enumerate(points[:-1])
+            for j, (b, _, _) in enumerate(points[:-1])
             if i < j and (d := ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5) < 1.5
+        ] + [
+            (20, 35, cls.SPRINGINESS, 1),
         ]
 
 
