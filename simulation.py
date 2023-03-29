@@ -1,3 +1,4 @@
+import abc
 import hashlib
 import importlib
 import inspect
@@ -78,35 +79,48 @@ class Spring:
         return 0.5 * self.springiness * (self.l - self.rest) ** 2
 
 
-class Simulation:
+class Simulation(abc.ABC):
     # required
     SPRINGS = None
     POINTS = None
     FIXED_POINTS = None
 
-    # optional
+    # physics
     GRAVITY = 9.81
-    MASS = 0.05
-    SPRINGINESS = 0.5
-    DAMPING = 0.003
-    REST = 0.25
+    DAMPING = 0.01
 
-    # time
+    # graphics
     STEPS = 10
     FPS = 60
     WIDTH = 1920 / 2
     HEIGHT = 1080 / 2
 
-    def __init__(self):
-        self.fixed_points = None
-        self.points = None
-        self.springs = None
-        self.range_kutta = None
-        self.hamiltonian = None
+    @classmethod
+    @abc.abstractmethod
+    def fixed_points(cls):
+        pass
 
-        data = pickle.dumps((self.FIXED_POINTS,
-                             self.POINTS, self.MASS, self.GRAVITY,
-                             self.SPRINGS, self.SPRINGINESS, self.REST))
+    @classmethod
+    @abc.abstractmethod
+    def points(cls):
+        pass
+
+    @classmethod
+    @abc.abstractmethod
+    def springs(cls):
+        pass
+
+    def __init__(self):
+        if self.FIXED_POINTS is None:
+            self.FIXED_POINTS = self.fixed_points()
+
+        if self.POINTS is None:
+            self.POINTS = self.points()
+
+        if self.SPRINGS is None:
+            self.SPRINGS = self.springs()
+
+        data = pickle.dumps((self.FIXED_POINTS, self.POINTS, self.SPRINGS))
         data_hash = hashlib.blake2b(data, person="simulator-v1".encode('utf-8'))
         cache_file = CACHE / f'generated_{data_hash.hexdigest()}.py'
 
@@ -146,17 +160,16 @@ class Simulation:
             self.hamiltonian = mod.hamiltonian
         print(f'Loaded lagrangian in {time.time() - now:.2f}s')
 
-    @staticmethod
-    def resolve_point(index: int, points: [T], fixed_points: [T]) -> T:
-        return points[index] if index >= 0 else fixed_points[-index - 1]
-
     def generate(self):
+        def resolve_point(index: int, points: [T], fixed_points: [T]) -> T:
+            return points[index] if index >= 0 else fixed_points[-index - 1]
+
         self.fixed_points = [FixedPoint(x, y) for x, y in self.FIXED_POINTS]
-        self.points = [Point(i, self.MASS, self.GRAVITY) for i in range(len(self.POINTS))]
-        self.springs = [Spring(self.resolve_point(a, self.points, self.fixed_points),
-                               self.resolve_point(b, self.points, self.fixed_points),
-                               self.SPRINGINESS, self.REST)
-                        for a, b in self.SPRINGS]
+        self.points = [Point(i, mass, self.GRAVITY) for i, (_, _, mass) in enumerate(self.POINTS)]
+        self.springs = [Spring(resolve_point(a, self.points, self.fixed_points),
+                               resolve_point(b, self.points, self.fixed_points),
+                               springiness, rest)
+                        for a, b, springiness, rest in self.SPRINGS]
         kinetic_energy = sum(p.k() for p in self.points)
         potential_energy = sum(p.u() for p in self.points) + sum(s.u() for s in self.springs)
         lagrangian = kinetic_energy - potential_energy
@@ -191,9 +204,7 @@ class Simulation:
                 expr = expr.replace(parameter, parameters_map[j])
             return f'        {expr},\n'
 
-        vectorized = ''.join([*tqdm((vectorize(source) for source in sources),
-                                    desc='Refactoring', total=len(sources))
-                              ])
+        vectorized = ''.join([vectorize(source) for source in sources])
         hamiltonian_vectorized = vectorize(hamiltonian_source)
         return f'from numpy import *\n' \
                f'from numba import njit\n' \
@@ -273,7 +284,7 @@ class Simulation:
             pygame.draw.line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
             pygame.draw.circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
 
-            for i, (a, b) in enumerate(self.SPRINGS):
+            for i, (a, b, _, _) in enumerate(self.SPRINGS):
                 p1 = (q[a * 2], q[a * 2 + 1]) if a >= 0 else self.FIXED_POINTS[-a - 1]
                 p2 = (q[b * 2], q[b * 2 + 1]) if b >= 0 else self.FIXED_POINTS[-b - 1]
                 pygame.draw.line(screen, pygame.color.Color(225, 82, 82), self.transform(*p1), self.transform(*p2), 2)
@@ -289,28 +300,35 @@ class Simulation:
 
     def transform(self, x, y):
         scale = min(self.WIDTH, self.HEIGHT) / 12
-        return scale * x + self.WIDTH / 2 - 5 * scale, \
-               -scale * y + self.HEIGHT / 2 + 5 * scale
+        return scale * x + self.WIDTH / 2 - 5 * scale, -scale * y + self.HEIGHT / 2 + 5 * scale
 
 
 class Rope(Simulation):
     MASS = 0.025
     SPRINGINESS = 0.25
-    DAMPING = 0.005
+    REST = 0.5
 
-    FIXED_POINTS = [
-        (5, 9),
-    ]
-    POINTS = [
-        ((5, 8), (1, 0)),
-        ((5, 7), (2, 1)),
-        ((5, 6), (4, 2)),
-    ]
-    SPRINGS = [
-        (-1, 0),
-        (0, 1),
-        (1, 2),
-    ]
+    @classmethod
+    def fixed_points(cls):
+        return [
+            (5, 9)
+        ]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((5, 8), (1, 0), cls.MASS),
+            ((5, 7), (2, 1), cls.MASS),
+            ((5, 6), (4, 2), cls.MASS),
+        ]
+
+    @classmethod
+    def springs(cls):
+        return [
+            (-1, 0, cls.SPRINGINESS, cls.REST),
+            (0, 1, cls.SPRINGINESS, cls.REST),
+            (1, 2, cls.SPRINGINESS, cls.REST),
+        ]
 
 
 class DoubleRope(Simulation):
@@ -318,9 +336,18 @@ class DoubleRope(Simulation):
     SPRINGINESS = 0.5
     REST = 0.2
 
-    FIXED_POINTS = [(2, 8), (8, 8)]
-    POINTS = [((2 + 0.2 * i, 8), (0, 0)) for i in range(1, 30)]
-    SPRINGS = [(-1, 0), (28, -2)] + [(i, i + 1) for i in range(28)]
+    @classmethod
+    def fixed_points(cls):
+        return [(2, 8), (8, 8)]
+
+    @classmethod
+    def points(cls):
+        return [((2 + 0.2 * i, 8), (0, 0), cls.MASS) for i in range(1, 30)]
+
+    @classmethod
+    def springs(cls):
+        return [(-1, 0, cls.SPRINGINESS, cls.REST), (28, -2, cls.SPRINGINESS, cls.REST)] + \
+            [(i, i + 1, cls.SPRINGINESS, cls.REST) for i in range(28)]
 
 
 class Cloth(Simulation):
@@ -328,30 +355,38 @@ class Cloth(Simulation):
     SPRINGINESS = 0.2
     REST = 1
 
-    FIXED_POINTS = [
-        (2, 8),
-        (8, 8),
-    ]
-    POINTS = [
-        ((2 + i, 8 - j), (0, 0))
-        for i in range(0, 7)
-        for j in range(0, 6)
-        if (i != 0 and i != 6) or j != 0
-    ]
-    SPRINGS = [
-                  (-1, 0),
-                  (-1, 5),
-                  (-2, 29),
-                  (-2, 35),
-              ] + [
-                  (i, i + 1)
-                  for i in range(39)
-                  if i % 6 != 4
-              ] + [
-                  (i, i + 5 + (i < 30))
-                  for i in range(35)
-                  if i != 29
-              ]
+    @classmethod
+    def fixed_points(cls):
+        return [
+            (2, 8),
+            (8, 8),
+        ]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((2 + i, 8 - j), (0, 0), cls.MASS)
+            for i in range(0, 7)
+            for j in range(0, 6)
+            if (i != 0 and i != 6) or j != 0
+        ]
+
+    @classmethod
+    def springs(cls):
+        return [
+            (-1, 0, cls.SPRINGINESS, cls.REST),
+            (-1, 5, cls.SPRINGINESS, cls.REST),
+            (-2, 29, cls.SPRINGINESS, cls.REST),
+            (-2, 35, cls.SPRINGINESS, cls.REST),
+        ] + [
+            (i, i + 1, cls.SPRINGINESS, cls.REST)
+            for i in range(39)
+            if i % 6 != 4
+        ] + [
+            (i, i + 5 + (i < 30), cls.SPRINGINESS, cls.REST)
+            for i in range(35)
+            if i != 29
+        ]
 
 
 class Benchmark(Simulation):
@@ -359,14 +394,22 @@ class Benchmark(Simulation):
     SPRINGINESS = 0.5
     REST = 0.2
 
-    FIXED_POINTS = [(1 + 8 / 10 * x, 10) for x in range(10)]
-    POINTS = [((1 + 8 / 10 * x, 10 - 5 / 10 * y), (0, 0))
-              for x in range(10)
-              for y in range(9)]
-    SPRINGS = [(-1 - x, x) for x in range(10)] + \
-              [(10 * y + x, 10 * (y + 1) + x) for x in range(10) for y in range(8)] + \
-              [(10 * y + x - 1, 10 * y + x) for x in range(1, 10) for y in range(8)] + \
-              [(10 * y + x, 10 * y + x + 1) for x in range(0, 9) for y in range(8)]
+    @classmethod
+    def fixed_points(cls):
+        return [(1 + 8 / 10 * x, 10) for x in range(10)]
+
+    @classmethod
+    def points(cls):
+        return [((1 + 8 / 10 * x, 10 - 5 / 10 * y, cls.MASS), (0, 0, cls.MASS))
+                for x in range(10)
+                for y in range(9)]
+
+    @classmethod
+    def springs(cls):
+        return [(-1 - x, x, cls.SPRINGINESS, cls.REST) for x in range(10)] + \
+            [(10 * y + x, 10 * (y + 1) + x, cls.SPRINGINESS, cls.REST) for x in range(10) for y in range(8)] + \
+            [(10 * y + x - 1, 10 * y + x, cls.SPRINGINESS, cls.REST) for x in range(1, 10) for y in range(8)] + \
+            [(10 * y + x, 10 * y + x + 1, cls.SPRINGINESS, cls.REST) for x in range(0, 9) for y in range(8)]
 
 
 if __name__ == '__main__':
