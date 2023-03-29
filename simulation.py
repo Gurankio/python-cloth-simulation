@@ -157,12 +157,12 @@ class Simulation(abc.ABC):
             self.hamiltonian = mod.fast_hamiltonian
 
             try:
-                self.range_kutta(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64), 1.0)
+                self.range_kutta(0.0, np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64), 1.0)
             except:
                 pass
 
             try:
-                self.hamiltonian(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64))
+                self.hamiltonian(0.0, np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64))
             except:
                 pass
         else:
@@ -286,7 +286,7 @@ class Simulation(abc.ABC):
         q = numpy.array(list(flatten([p[0] for p in self.POINTS])), dtype=numpy.float64)
         qd = numpy.array(list(flatten([p[1] for p in self.POINTS])), dtype=numpy.float64)
         dt = 1 / self.FPS
-        tv = 0
+        tv = 0.0
 
         while running:
             for event in pygame.event.get():
