@@ -289,7 +289,7 @@ class Simulation(abc.ABC):
                     running = False
 
             for _ in range(self.STEPS):
-                q, qd = self.range_kutta(q, qd, dt / self.STEPS)
+                q, qd = self.range_kutta(q, qd, 1 / self.FPS / self.STEPS)
             qd *= 1 - self.DAMPING
             h = self.hamiltonian(q, qd)
 
@@ -427,10 +427,49 @@ class Benchmark(Simulation):
             [(10 * y + x, 10 * y + x + 1, cls.SPRINGINESS, cls.REST) for x in range(0, 9) for y in range(8)]
 
 
+class Building(Simulation):
+    SPRINGINESS = 10
+    MASS = 0.05
+
+    H = 5
+
+    @classmethod
+    def fixed_points(cls):
+        return [(i, 0) for i in range(11)]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((i, j), (0, 0), cls.MASS)
+            for i in range(3, 8)
+            for j in range(1, cls.H)
+        ]
+
+    @classmethod
+    def springs(cls):
+        points = cls.points()
+        return [
+            (-4 - i, (cls.H - 1) * i, cls.SPRINGINESS, 1)
+            for i in range(5)
+        ] + [
+            (-4 - i, (cls.H - 1) * (i + 1), cls.SPRINGINESS, 2 ** .5)
+            for i in range(4)
+        ] + [
+            (-5 - i, (cls.H - 1) * i, cls.SPRINGINESS, 2 ** .5)
+            for i in range(4)
+        ] + [
+            (i, j, cls.SPRINGINESS, d)
+            for i, (a, _, _) in enumerate(points)
+            for j, (b, _, _) in enumerate(points)
+            if i < j and (d := ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5) < 1.5
+        ]
+
+
 if __name__ == '__main__':
     sims = {
         'rope': Rope,
         'double-rope': DoubleRope,
         'cloth': Cloth,
         'benchmark': Benchmark,
+        'building': Building,
     }[sys.argv[1]]().run()
