@@ -602,7 +602,7 @@ if __name__ == '__main__':
         'cloth': Cloth,
         'moving-cloth': MovingCloth,
         'building': Building,
-        # 'moving-building': MovingBuilding,
+        'moving-building': MovingBuilding,
     }
     if len(sys.argv) == 1:
         print("missing simulation name")
