@@ -85,6 +85,7 @@ class Simulation(Scene):
     REST = 0.25
 
     # time
+    STEPS = 1
     DELTA = 1 / 30
     RUNTIME = 1 / DELTA * 30  # run for 30 seconds
 
@@ -289,11 +290,12 @@ class Simulation(Scene):
         self.play(*(ShowCreation(line, scale=0.5) for line in lines), run_time=self.FADE)
 
         try:
-            start_time = time.time()
+            # start_time = time.time()
             frames = 0
             while frames < self.RUNTIME:
                 now = time.time_ns()
-                q, qd = self.range_kutta(q, qd, self.DELTA)
+                for _ in range(self.STEPS):
+                    q, qd = self.range_kutta(q, qd, self.DELTA / self.STEPS)
                 qd *= 1 - self.DAMPING
                 h = self.hamiltonian(q, qd)
                 elapsed = (time.time_ns() - now) / 1_000_000
@@ -304,12 +306,12 @@ class Simulation(Scene):
                 self.play(
                     hamilton_dot.animate.move_to(self.AXES.c2p(h, 0)),
                     *[dot.animate.move_to(self.AXES.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
-                    run_time=self.DELTA,
+                    run_time=0.0001,
                 )
 
-                start_time += self.DELTA
-                delay = time.time() - start_time
-                print(f'Computing time:{elapsed:7.3f}ms | Delay:{1000 * delay:9.3f}ms')
+                # start_time += self.DELTA
+                # delay = time.time() - start_time
+                # print(f'Computing time:{elapsed:7.3f}ms | Delay:{1000 * delay:9.3f}ms')
 
                 frames += 1
         except KeyboardInterrupt:
@@ -336,6 +338,9 @@ class DoubleRope(Simulation):
     MASS = 0.0005
     SPRINGINESS = 0.5
     REST = 0.2
+
+    DELTA = 1 / 3
+    STEPS = 1000
 
     FIXED_POINTS = [(2, 8), (8, 8)]
     POINTS = [((2 + 0.2 * i, 8), (0, 0)) for i in range(1, 30)]
