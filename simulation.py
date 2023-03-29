@@ -1,4 +1,5 @@
 import abc
+import math
 import hashlib
 import importlib
 import inspect
@@ -293,8 +294,8 @@ class Simulation(abc.ABC):
                     running = False
 
             for _ in range(self.STEPS):
-                q, qd = self.range_kutta(tv, q, qd, dt / self.STEPS)
-                tv += dt / self.STEPS
+                q, qd = self.range_kutta(tv, q, qd, 1 / self.FPS / self.STEPS)
+                tv += 1 / self.FPS / self.STEPS
             qd *= 1 - self.DAMPING
             h = self.hamiltonian(tv, q, qd)
 
@@ -304,7 +305,7 @@ class Simulation(abc.ABC):
             from pygame.draw import line, circle
 
             line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
-            circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
+            circle(screen, pygame.color.Color(93, 194, 57), self.transform((int(h > 0) - int(h < 0)) * math.log(abs(h)), 0), 5)
 
             def resolve_fixed(tv, x, y):
                 return float((0 * t + x).evalf(subs={t: tv})), float((0 * t + y).evalf(subs={t: tv}))
@@ -438,10 +439,10 @@ class Benchmark(Simulation):
 
 
 class Building(Simulation):
-    SPRINGINESS = 10
+    SPRINGINESS = 100
     MASS = 0.05
 
-    H = 5
+    H = 8
 
     @classmethod
     def fixed_points(cls):
@@ -450,7 +451,7 @@ class Building(Simulation):
     @classmethod
     def points(cls):
         return [
-            ((i, j), (0, 0), cls.MASS)
+            ((i, j), (0, 0), cls.MASS / j)
             for i in range(3, 8)
             for j in range(1, cls.H)
         ]
