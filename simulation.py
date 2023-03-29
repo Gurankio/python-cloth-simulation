@@ -106,7 +106,7 @@ class Simulation(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def fixed_points(cls) -> [(float, float)]:
+    def fixed_points(cls) -> [(float | sympy.Function, float | sympy.Function)]:
         pass
 
     @classmethod
@@ -200,12 +200,12 @@ class Simulation(abc.ABC):
         qd = list(flatten([p.vx, p.vy] for p in self.points))
 
         sources = list(flatten([
-            (inspect.getsource(sympy.lambdify(q + qd, e[p.ax], 'numpy')),
-             inspect.getsource(sympy.lambdify(q + qd, e[p.ay], 'numpy')))
+            (inspect.getsource(sympy.lambdify([t] + q + qd, e[p.ax], 'numpy')),
+             inspect.getsource(sympy.lambdify([t] + q + qd, e[p.ay], 'numpy')))
             for e, p in tqdm(zip(eq_lagrangian, self.points),
                              desc='Generating source', total=len(self.points))
         ]))
-        hamiltonian_source = inspect.getsource(sympy.lambdify(q + qd, hamiltonian, 'numpy'))
+        hamiltonian_source = inspect.getsource(sympy.lambdify([t] + q + qd, hamiltonian, 'numpy'))
         parameters_map = [
             *flatten([f'q[{i * 2}]', f'q[{i * 2 + 1}]']
                      for i in range(len(self.points))),
@@ -216,7 +216,8 @@ class Simulation(abc.ABC):
 
         def vectorize(source):
             parameters, expr = definition.match(source).groups()
-            parameters = parameters.split(', ')
+            t, *parameters = parameters.split(', ')
+            expr = expr.replace(t, 't')
             for j, parameter in enumerate(parameters):
                 expr = expr.replace(parameter, parameters_map[j])
             return f'        {expr},\n'
@@ -227,46 +228,46 @@ class Simulation(abc.ABC):
                f'from numba import njit\n' \
                f'\n' \
                f'@njit(fastmath=True, parallel=False, cache=True)\n' \
-               f'def fast_hamiltonian(q, qd):\n' \
+               f'def fast_hamiltonian(t, q, qd):\n' \
                f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
                f'\n' \
                '@njit(fastmath=True, parallel=False, cache=True)\n' \
-               'def fast_range_kutta(q, qd, delta):\n' \
+               'def fast_range_kutta(t, q, qd, delta):\n' \
                '    k1 = qd\n' \
-               '    k1d = _fast_lagrangian(q, qd)\n' \
+               '    k1d = _fast_lagrangian(t, q, qd)\n' \
                '    k2 = qd + 0.5 * k1d * delta\n' \
-               '    k2d = _fast_lagrangian(q + 0.5 * k1 * delta, qd + 0.5 * k1d * delta)\n' \
+               '    k2d = _fast_lagrangian(t, q + 0.5 * k1 * delta, qd + 0.5 * k1d * delta)\n' \
                '    k3 = qd + 0.5 * k2d * delta\n' \
-               '    k3d = _fast_lagrangian(q + 0.5 * k2 * delta, qd + 0.5 * k2d * delta)\n' \
+               '    k3d = _fast_lagrangian(t, q + 0.5 * k2 * delta, qd + 0.5 * k2d * delta)\n' \
                '    k4 = qd + k3d * delta\n' \
-               '    k4d = _fast_lagrangian(q + k3 * delta, qd + k3d * delta)\n' \
+               '    k4d = _fast_lagrangian(t, q + k3 * delta, qd + k3d * delta)\n' \
                '    q += (k1 + 2 * k2 + 2 * k3 + k4) * delta / 6\n' \
                '    qd += (k1d + 2 * k2d + 2 * k3d + k4d) * delta / 6\n' \
                '    return q, qd\n' \
                f'\n' \
                f'@njit(fastmath=True, parallel=False, cache=True)\n' \
-               f'def _fast_lagrangian(q, qd):\n' \
+               f'def _fast_lagrangian(t, q, qd):\n' \
                f'    return array([\n' \
                f'{vectorized}' \
                f'    ])\n' \
                f'\n' \
-               f'def hamiltonian(q, qd):\n' \
+               f'def hamiltonian(t, q, qd):\n' \
                f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
                f'\n' \
-               'def range_kutta(q, qd, delta):\n' \
+               'def range_kutta(t, q, qd, delta):\n' \
                '    k1 = qd\n' \
-               '    k1d = _lagrangian(q, qd)\n' \
+               '    k1d = _lagrangian(t, q, qd)\n' \
                '    k2 = qd + 0.5 * k1d * delta\n' \
-               '    k2d = _lagrangian(q + 0.5 * k1 * delta, qd + 0.5 * k1d * delta)\n' \
+               '    k2d = _lagrangian(t, q + 0.5 * k1 * delta, qd + 0.5 * k1d * delta)\n' \
                '    k3 = qd + 0.5 * k2d * delta\n' \
-               '    k3d = _lagrangian(q + 0.5 * k2 * delta, qd + 0.5 * k2d * delta)\n' \
+               '    k3d = _lagrangian(t, q + 0.5 * k2 * delta, qd + 0.5 * k2d * delta)\n' \
                '    k4 = qd + k3d * delta\n' \
-               '    k4d = _lagrangian(q + k3 * delta, qd + k3d * delta)\n' \
+               '    k4d = _lagrangian(t, q + k3 * delta, qd + k3d * delta)\n' \
                '    q += (k1 + 2 * k2 + 2 * k3 + k4) * delta / 6\n' \
                '    qd += (k1d + 2 * k2d + 2 * k3d + k4d) * delta / 6\n' \
                '    return q, qd\n' \
                f'\n' \
-               f'def _lagrangian(q, qd):\n' \
+               f'def _lagrangian(t, q, qd):\n' \
                f'    return array([\n' \
                f'{vectorized}' \
                f'    ])\n' \
@@ -284,6 +285,7 @@ class Simulation(abc.ABC):
         q = numpy.array(list(flatten([p[0] for p in self.POINTS])), dtype=numpy.float64)
         qd = numpy.array(list(flatten([p[1] for p in self.POINTS])), dtype=numpy.float64)
         dt = 1 / self.FPS
+        tv = 0
 
         while running:
             for event in pygame.event.get():
@@ -291,26 +293,32 @@ class Simulation(abc.ABC):
                     running = False
 
             for _ in range(self.STEPS):
-                q, qd = self.range_kutta(q, qd, 1 / self.FPS / self.STEPS)
+                q, qd = self.range_kutta(tv, q, qd, dt / self.STEPS)
+                tv += dt / self.STEPS
             qd *= 1 - self.DAMPING
-            h = self.hamiltonian(q, qd)
+            h = self.hamiltonian(tv, q, qd)
 
             # fill the screen with a color to wipe away anything from last frame
             screen.fill(pygame.color.Color(27, 27, 27))
 
-            pygame.draw.line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
-            pygame.draw.circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
+            from pygame.draw import line, circle
+
+            line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
+            circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
+
+            def resolve_fixed(tv, x, y):
+                return float((0 * t + x).evalf(subs={t: tv})), float((0 * t + y).evalf(subs={t: tv}))
 
             for i, (a, b, _, _) in enumerate(self.SPRINGS):
-                p1 = (q[a * 2], q[a * 2 + 1]) if a >= 0 else self.FIXED_POINTS[-a - 1]
-                p2 = (q[b * 2], q[b * 2 + 1]) if b >= 0 else self.FIXED_POINTS[-b - 1]
-                pygame.draw.line(screen, pygame.color.Color(225, 82, 82), self.transform(*p1), self.transform(*p2), 2)
+                p1 = (q[a * 2], q[a * 2 + 1]) if a >= 0 else resolve_fixed(tv, *self.FIXED_POINTS[-a - 1])
+                p2 = (q[b * 2], q[b * 2 + 1]) if b >= 0 else resolve_fixed(tv, *self.FIXED_POINTS[-b - 1])
+                line(screen, pygame.color.Color(225, 82, 82), self.transform(*p1), self.transform(*p2), 2)
 
             for pos in self.FIXED_POINTS:
-                pygame.draw.circle(screen, pygame.color.Color(236, 140, 40), self.transform(*pos), 5)
+                circle(screen, pygame.color.Color(236, 140, 40), self.transform(*resolve_fixed(tv, *pos)), 5)
 
             for i in range(len(self.POINTS)):
-                pygame.draw.circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), 5)
+                circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), 5)
 
             pygame.display.flip()
             dt = clock.tick(self.FPS) / 1000
@@ -328,7 +336,7 @@ class Rope(Simulation):
     @classmethod
     def fixed_points(cls):
         return [
-            (5, 9)
+            (5 + sympy.sin(t * 2), 9)
         ]
 
     @classmethod
