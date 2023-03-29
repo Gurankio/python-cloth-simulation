@@ -2,6 +2,7 @@ import abc
 import hashlib
 import importlib
 import inspect
+import multiprocessing
 import pathlib
 import pickle
 import re
@@ -12,6 +13,7 @@ from typing import TypeVar
 import appdirs
 import numpy
 import numpy as np
+import pqdm.threads
 import sympy
 from more_itertools import flatten
 from tqdm.auto import tqdm
@@ -77,6 +79,12 @@ class Spring:
 
     def u(self):
         return 0.5 * self.springiness * (self.l - self.rest) ** 2
+
+
+def do_solve(eq):
+    import sympy
+    eq, t = sympy.sympify(eq)
+    return repr(sympy.solve(eq, t))
 
 
 class Simulation(abc.ABC):
@@ -174,12 +182,18 @@ class Simulation(abc.ABC):
         potential_energy = sum(p.u() for p in self.points) + sum(s.u() for s in self.springs)
         lagrangian = kinetic_energy - potential_energy
         hamiltonian = kinetic_energy + potential_energy
-        eq_lagrangian = [
-            sympy.solve([sympy.diff(sympy.diff(lagrangian, p.vx), t) - sympy.diff(lagrangian, p.x),
-                         sympy.diff(sympy.diff(lagrangian, p.vy), t) - sympy.diff(lagrangian, p.y)],
-                        [p.ax, p.ay])
-            for p in tqdm(self.points, desc='Solving Euler-Lagrange equations')
+
+        eq_lagrangian_data = [
+            repr(([sympy.diff(sympy.diff(lagrangian, p.vx), t) - sympy.diff(lagrangian, p.x),
+                   sympy.diff(sympy.diff(lagrangian, p.vy), t) - sympy.diff(lagrangian, p.y)],
+                  [p.ax, p.ay]))
+            for p in tqdm(self.points, desc='Preparing Euler-Lagrange equations')
         ]
+
+        eq_lagrangian = pqdm.threads.pqdm(eq_lagrangian_data, do_solve, multiprocessing.cpu_count(),
+                                          desc='Solving Euler-Lagrange equations', total=len(self.points))
+        eq_lagrangian = [sympy.sympify(sol) for sol in eq_lagrangian]
+
         q = list(flatten([p.x, p.y] for p in self.points))
         qd = list(flatten([p.vx, p.vy] for p in self.points))
         sources = list(flatten([
@@ -279,7 +293,7 @@ class Simulation(abc.ABC):
             h = self.hamiltonian(q, qd)
 
             # fill the screen with a color to wipe away anything from last frame
-            screen.fill(pygame.color.Color(51, 51, 51))
+            screen.fill(pygame.color.Color(27, 27, 27))
 
             pygame.draw.line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
             pygame.draw.circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
