@@ -1,24 +1,31 @@
+import hashlib
 import importlib
+import inspect
 import pathlib
 import pickle
+import re
+import sys
+import time
+from typing import TypeVar
 
 import appdirs
 import numpy
 import numpy as np
 import sympy
-from manimlib import *
 from more_itertools import flatten
 from tqdm.auto import tqdm
 
+import pygame
+
 t = sympy.symbols('t')
+T = TypeVar('T')
 
 # caching
 CACHE = pathlib.Path(appdirs.user_cache_dir('python-lagrangian-simulator'))
 CACHE.mkdir(parents=True, exist_ok=True)
 
 # simulation options
-OPTIMIZED = True
-STATS = True
+OPTIMIZED = False
 
 
 class FixedPoint:
@@ -71,43 +78,73 @@ class Spring:
         return 0.5 * self.springiness * (self.l - self.rest) ** 2
 
 
-class Simulation(Scene):
+class Simulation:
     # required
     SPRINGS = None
     POINTS = None
     FIXED_POINTS = None
 
     # optional
-    MASS = 0.05
     GRAVITY = 9.81
+    MASS = 0.05
     SPRINGINESS = 0.5
-    DAMPING = 0.01
+    DAMPING = 0.003
     REST = 0.25
 
     # time
-    STEPS = 1
-    DELTA = 1 / 30
-    RUNTIME = 1 / DELTA * 30  # run for 30 seconds
+    STEPS = 10
+    FPS = 60
+    WIDTH = 1920 / 2
+    HEIGHT = 1080 / 2
 
-    # graphics
-    FADE = 1
-
-    AXES = Axes(
-        x_range=(0, 10, 0.5),
-        y_range=(0, 10, 0.5),
-    )
-    AXES.add_coordinate_labels(
-        font_size=20,
-        num_decimal_places=1
-    )
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self):
         self.fixed_points = None
         self.points = None
         self.springs = None
         self.range_kutta = None
         self.hamiltonian = None
+
+        data = pickle.dumps((self.FIXED_POINTS,
+                             self.POINTS, self.MASS, self.GRAVITY,
+                             self.SPRINGS, self.SPRINGINESS, self.REST))
+        data_hash = hashlib.blake2b(data, person="simulator-v1".encode('utf-8'))
+        cache_file = CACHE / f'generated_{data_hash.hexdigest()}.py'
+
+        if not cache_file.exists():
+            print(f'Generating lagrangian ({data_hash.hexdigest()})')
+            source = self.generate()
+
+            try:
+                cache_file.touch(exist_ok=False)
+                cache_file.write_text(source)
+            except:
+                print('Failed to save lagrangian, file exists?')
+                exit(1)
+
+        print(f'Loading lagrangian, this might take a while... ({data_hash.hexdigest()})')
+        now = time.time()
+        spec = importlib.util.spec_from_file_location(cache_file.name, str(cache_file))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[cache_file.name] = mod
+        spec.loader.exec_module(mod)
+        if OPTIMIZED:
+            length = 2 * len(self.POINTS)
+            self.range_kutta = mod.fast_range_kutta
+            self.hamiltonian = mod.fast_hamiltonian
+
+            try:
+                self.range_kutta(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64), 1.0)
+            except:
+                pass
+
+            try:
+                self.hamiltonian(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64))
+            except:
+                pass
+        else:
+            self.range_kutta = mod.range_kutta
+            self.hamiltonian = mod.hamiltonian
+        print(f'Loaded lagrangian in {time.time() - now:.2f}s')
 
     @staticmethod
     def resolve_point(index: int, points: [T], fixed_points: [T]) -> T:
@@ -163,7 +200,7 @@ class Simulation(Scene):
                f'\n' \
                f'@njit(fastmath=True, parallel=False, cache=True)\n' \
                f'def fast_hamiltonian(q, qd):\n' \
-               f'    return {hamiltonian_vectorized.removesuffix(",")}' \
+               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
                f'\n' \
                '@njit(fastmath=True, parallel=False, cache=True)\n' \
                'def fast_range_kutta(q, qd, delta):\n' \
@@ -183,10 +220,10 @@ class Simulation(Scene):
                f'def _fast_lagrangian(q, qd):\n' \
                f'    return array([\n' \
                f'{vectorized}' \
-               f'    ])' \
+               f'    ])\n' \
                f'\n' \
                f'def hamiltonian(q, qd):\n' \
-               f'    return {hamiltonian_vectorized.removesuffix(",")}' \
+               f'    return {hamiltonian_vectorized.strip().removesuffix(",")}' \
                f'\n' \
                'def range_kutta(q, qd, delta):\n' \
                '    k1 = qd\n' \
@@ -204,121 +241,63 @@ class Simulation(Scene):
                f'def _lagrangian(q, qd):\n' \
                f'    return array([\n' \
                f'{vectorized}' \
-               f'    ])' \
+               f'    ])\n' \
                f'\n'
 
-    def setup(self):
-        data = pickle.dumps((self.FIXED_POINTS,
-                             self.POINTS, self.MASS, self.GRAVITY,
-                             self.SPRINGS, self.SPRINGINESS, self.REST))
-        data_hash = hashlib.blake2b(data, person="simulator-v1".encode('utf-8'))
-        cache_file = CACHE / f'generated_{data_hash.hexdigest()}.py'
-
-        if not cache_file.exists():
-            print(f'Generating lagrangian ({data_hash.hexdigest()})')
-            source = self.generate()
-
-            try:
-                cache_file.touch(exist_ok=False)
-                cache_file.write_text(source)
-            except:
-                print('Failed to save lagrangian, file exists?')
-                exit(1)
-
-        print(f'Loading lagrangian, this might take a while... ({data_hash.hexdigest()})')
-        now = time.time()
-        spec = importlib.util.spec_from_file_location(cache_file.name, str(cache_file))
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[cache_file.name] = mod
-        spec.loader.exec_module(mod)
-        if OPTIMIZED:
-            length = 2 * len(self.POINTS)
-            self.range_kutta = mod.fast_range_kutta
-            self.hamiltonian = mod.fast_hamiltonian
-
-            try:
-                self.range_kutta(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64), self.DELTA)
-            except:
-                pass
-
-            try:
-                self.hamiltonian(np.ones(length, dtype=np.float64), np.ones(length, dtype=np.float64))
-            except:
-                pass
-        else:
-            self.range_kutta = mod.range_kutta
-            self.hamiltonian = mod.hamiltonian
-        print(f'Loaded lagrangian in {time.time() - now:.2f}s')
-
-    def construct(self):
-        self.AXES.fix_in_frame()
-        self.add(self.AXES)
-
-        if STATS:
-            frame_time = DecimalNumber(
-                0.00,
-                show_ellipsis=False,
-                num_decimal_places=2,
-                include_sign=True,
-                unit="ms",
-            )
-            frame_time.to_corner(UP + RIGHT)
-            self.add(frame_time)
+    def run(self):
+        pygame.init()
+        # screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        self.WIDTH = screen.get_width()
+        self.HEIGHT = screen.get_height()
+        clock = pygame.time.Clock()
+        running = True
 
         q = numpy.array(list(flatten([p[0] for p in self.POINTS])), dtype=numpy.float64)
         qd = numpy.array(list(flatten([p[1] for p in self.POINTS])), dtype=numpy.float64)
+        dt = 1 / self.FPS
 
-        hamilton_dot = Dot(self.AXES.c2p(0, 0), color=GREEN)
-        self.add(hamilton_dot)
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
 
-        fixed_dots = [Dot(self.AXES.c2p(x, y), color=BLUE) for x, y in self.FIXED_POINTS]
-        self.play(*(ShowCreation(dot, scale=0.5) for dot in fixed_dots), run_time=self.FADE)
+            for _ in range(self.STEPS):
+                q, qd = self.range_kutta(q, qd, dt / self.STEPS)
+            qd *= 1 - self.DAMPING
+            h = self.hamiltonian(q, qd)
 
-        dots = [Dot(color=RED) for _ in self.POINTS]
-        for i, dot in enumerate(dots):
-            dot.move_to(self.AXES.c2p(q[i * 2], q[i * 2 + 1]))
-        self.play(*(ShowCreation(dot, scale=0.5) for dot in dots), run_time=self.FADE)
+            # fill the screen with a color to wipe away anything from last frame
+            screen.fill(pygame.color.Color(51, 51, 51))
 
-        lines = [Line(color=RED_C) for _ in self.SPRINGS]
-        for line, (p1, p2) in zip(lines, self.SPRINGS):
-            f_always(
-                line.put_start_and_end_on,
-                (dots[p1] if p1 >= 0 else fixed_dots[-p1 - 1]).get_center,
-                (dots[p2] if p2 >= 0 else fixed_dots[-p2 - 1]).get_center
-            )
-            self.bring_to_back(line)
-        self.play(*(ShowCreation(line, scale=0.5) for line in lines), run_time=self.FADE)
+            pygame.draw.line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
+            pygame.draw.circle(screen, pygame.color.Color(93, 194, 57), self.transform(h, 0), 5)
 
-        try:
-            # start_time = time.time()
-            frames = 0
-            while frames < self.RUNTIME:
-                now = time.time_ns()
-                for _ in range(self.STEPS):
-                    q, qd = self.range_kutta(q, qd, self.DELTA / self.STEPS)
-                qd *= 1 - self.DAMPING
-                h = self.hamiltonian(q, qd)
-                elapsed = (time.time_ns() - now) / 1_000_000
+            for i, (a, b) in enumerate(self.SPRINGS):
+                p1 = (q[a * 2], q[a * 2 + 1]) if a >= 0 else self.FIXED_POINTS[-a - 1]
+                p2 = (q[b * 2], q[b * 2 + 1]) if b >= 0 else self.FIXED_POINTS[-b - 1]
+                pygame.draw.line(screen, pygame.color.Color(225, 82, 82), self.transform(*p1), self.transform(*p2), 2)
 
-                if STATS:
-                    frame_time.set_value(elapsed)
+            for pos in self.FIXED_POINTS:
+                pygame.draw.circle(screen, pygame.color.Color(236, 140, 40), self.transform(*pos), 5)
 
-                self.play(
-                    hamilton_dot.animate.move_to(self.AXES.c2p(h, 0)),
-                    *[dot.animate.move_to(self.AXES.c2p(q[i * 2], q[i * 2 + 1])) for i, dot in enumerate(dots)],
-                    run_time=0.0001,
-                )
+            for i in range(len(self.POINTS)):
+                pygame.draw.circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), 5)
 
-                # start_time += self.DELTA
-                # delay = time.time() - start_time
-                # print(f'Computing time:{elapsed:7.3f}ms | Delay:{1000 * delay:9.3f}ms')
+            pygame.display.flip()
+            dt = clock.tick(self.FPS) / 1000
 
-                frames += 1
-        except KeyboardInterrupt:
-            pass
+    def transform(self, x, y):
+        scale = min(self.WIDTH, self.HEIGHT) / 12
+        return scale * x + self.WIDTH / 2 - 5 * scale, \
+               -scale * y + self.HEIGHT / 2 + 5 * scale
 
 
 class Rope(Simulation):
+    MASS = 0.025
+    SPRINGINESS = 0.25
+    DAMPING = 0.005
+
     FIXED_POINTS = [
         (5, 9),
     ]
@@ -335,12 +314,9 @@ class Rope(Simulation):
 
 
 class DoubleRope(Simulation):
-    MASS = 0.0005
+    MASS = 0.0010
     SPRINGINESS = 0.5
     REST = 0.2
-
-    DELTA = 1 / 3
-    STEPS = 1000
 
     FIXED_POINTS = [(2, 8), (8, 8)]
     POINTS = [((2 + 0.2 * i, 8), (0, 0)) for i in range(1, 30)]
@@ -351,7 +327,6 @@ class Cloth(Simulation):
     MASS = 0.001
     SPRINGINESS = 0.2
     REST = 1
-    DELTA = 1 / 50
 
     FIXED_POINTS = [
         (2, 8),
@@ -384,8 +359,6 @@ class Benchmark(Simulation):
     SPRINGINESS = 0.5
     REST = 0.2
 
-    DELTA = 1 / 30
-
     FIXED_POINTS = [(1 + 8 / 10 * x, 10) for x in range(10)]
     POINTS = [((1 + 8 / 10 * x, 10 - 5 / 10 * y), (0, 0))
               for x in range(10)
@@ -394,3 +367,12 @@ class Benchmark(Simulation):
               [(10 * y + x, 10 * (y + 1) + x) for x in range(10) for y in range(8)] + \
               [(10 * y + x - 1, 10 * y + x) for x in range(1, 10) for y in range(8)] + \
               [(10 * y + x, 10 * y + x + 1) for x in range(0, 9) for y in range(8)]
+
+
+if __name__ == '__main__':
+    sims = {
+        'rope': Rope,
+        'double-rope': DoubleRope,
+        'cloth': Cloth,
+        'benchmark': Benchmark,
+    }[sys.argv[1]]().run()
