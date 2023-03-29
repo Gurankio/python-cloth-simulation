@@ -193,6 +193,8 @@ class Simulation(abc.ABC):
 
         eq_lagrangian = pqdm(eq_lagrangian_data, do_solve, multiprocessing.cpu_count(),
                              desc='Solving Euler-Lagrange equations', total=len(self.points))
+        eq_lagrangian = [*tqdm((sympy.sympify(sol) for sol in eq_lagrangian),
+                               desc='Parsing Euler-Lagrange equations', total=len(self.points))]
 
         q = list(flatten([p.x, p.y] for p in self.points))
         qd = list(flatten([p.vx, p.vy] for p in self.points))
