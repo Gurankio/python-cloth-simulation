@@ -296,7 +296,7 @@ class Simulation(abc.ABC):
             for _ in range(self.STEPS):
                 q, qd = self.range_kutta(tv, q, qd, 1 / self.FPS / self.STEPS)
                 tv += 1 / self.FPS / self.STEPS
-            qd *= 1 - self.DAMPING
+            qd *= (1 - self.DAMPING)
             h = self.hamiltonian(tv, q, qd)
 
             # fill the screen with a color to wipe away anything from last frame
@@ -305,7 +305,8 @@ class Simulation(abc.ABC):
             from pygame.draw import line, circle
 
             line(screen, pygame.color.Color(255, 255, 255), self.transform(0, 0), self.transform(10, 0), 2)
-            circle(screen, pygame.color.Color(93, 194, 57), self.transform((int(h > 0) - int(h < 0)) * math.log(abs(h)), 0), 5)
+            circle(screen, pygame.color.Color(93, 194, 57),
+                   self.transform((int(h > 0) - int(h < 0)) * math.log(abs(h)), 0), 5)
 
             def resolve_fixed(tv, x, y):
                 return float((0 * t + x).evalf(subs={t: tv})), float((0 * t + y).evalf(subs={t: tv}))
@@ -415,29 +416,6 @@ class Cloth(Simulation):
         ]
 
 
-class Benchmark(Simulation):
-    MASS = 0.0005
-    SPRINGINESS = 0.5
-    REST = 0.2
-
-    @classmethod
-    def fixed_points(cls):
-        return [(1 + 8 / 10 * x, 10) for x in range(10)]
-
-    @classmethod
-    def points(cls):
-        return [((1 + 8 / 10 * x, 10 - 5 / 10 * y, cls.MASS), (0, 0, cls.MASS))
-                for x in range(10)
-                for y in range(9)]
-
-    @classmethod
-    def springs(cls):
-        return [(-1 - x, x, cls.SPRINGINESS, cls.REST) for x in range(10)] + \
-            [(10 * y + x, 10 * (y + 1) + x, cls.SPRINGINESS, cls.REST) for x in range(10) for y in range(8)] + \
-            [(10 * y + x - 1, 10 * y + x, cls.SPRINGINESS, cls.REST) for x in range(1, 10) for y in range(8)] + \
-            [(10 * y + x, 10 * y + x + 1, cls.SPRINGINESS, cls.REST) for x in range(0, 9) for y in range(8)]
-
-
 class Building(Simulation):
     SPRINGINESS = 100
     MASS = 0.05
@@ -477,14 +455,18 @@ class Building(Simulation):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 1:
-        print("missing simulation name")
-    if len(sys.argv) > 2:
-        OPTIMIZED = sys.argv[2] == "optimized"
     sims = {
         'rope': Rope,
         'double-rope': DoubleRope,
         'cloth': Cloth,
-        'benchmark': Benchmark,
         'building': Building,
-    }[sys.argv[1]]().run()
+    }
+    if len(sys.argv) == 1:
+        print("missing simulation name")
+    if len(sys.argv) > 2:
+        OPTIMIZED = sys.argv[2] == "--optimized"
+    if sys.argv[1] == "--compile":
+        for name, sim in sims.items():
+            print(f'Compiling: {name}')
+            sim = sim()
+    sims[sys.argv[1]]().run()
