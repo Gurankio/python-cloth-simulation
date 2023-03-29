@@ -477,6 +477,10 @@ class Building(Simulation):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        print("missing simulation name")
+    if len(sys.argv) > 2:
+        OPTIMIZED = sys.argv[2] == "optimized"
     sims = {
         'rope': Rope,
         'double-rope': DoubleRope,
