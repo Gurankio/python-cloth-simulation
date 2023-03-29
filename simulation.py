@@ -101,13 +101,13 @@ class Simulation(abc.ABC):
 
     # physics
     GRAVITY = 9.81
-    DAMPING = 0.01
+    DAMPING = 0
 
     # graphics
     STEPS = 10
     FPS = 60
-    WIDTH = 1920 / 2
-    HEIGHT = 1080 / 2
+    WIDTH = None
+    HEIGHT = None
 
     @classmethod
     @abc.abstractmethod
@@ -134,7 +134,7 @@ class Simulation(abc.ABC):
         if self.SPRINGS is None:
             self.SPRINGS = self.springs()
 
-        data = pickle.dumps((self.FIXED_POINTS, self.POINTS, self.SPRINGS))
+        data = pickle.dumps((self.FIXED_POINTS, self.POINTS, self.SPRINGS, self.GRAVITY))
         data_hash = hashlib.blake2b(data, person="simulator-v1".encode('utf-8'))
         cache_file = CACHE / f'generated_{data_hash.hexdigest()}.py'
 
@@ -280,16 +280,17 @@ class Simulation(abc.ABC):
 
     def run(self):
         pygame.init()
-        # screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-        self.WIDTH = screen.get_width()
-        self.HEIGHT = screen.get_height()
+        if self.WIDTH is not None and self.HEIGHT is not None:
+            screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+        else:
+            screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.WIDTH = screen.get_width()
+            self.HEIGHT = screen.get_height()
         clock = pygame.time.Clock()
         running = True
 
         q = numpy.array(list(flatten([p[0] for p in self.POINTS])), dtype=numpy.float64)
         qd = numpy.array(list(flatten([p[1] for p in self.POINTS])), dtype=numpy.float64)
-        dt = 1 / self.FPS
         tv = 0.0
 
         while running:
@@ -327,7 +328,7 @@ class Simulation(abc.ABC):
                 circle(screen, pygame.color.Color(225, 82, 82), self.transform(q[i * 2], q[i * 2 + 1]), 5)
 
             pygame.display.flip()
-            dt = clock.tick(self.FPS) / 1000
+            clock.tick(self.FPS)
 
     def transform(self, x, y):
         scale = min(self.WIDTH, self.HEIGHT) / 12
@@ -336,13 +337,13 @@ class Simulation(abc.ABC):
 
 class Rope(Simulation):
     MASS = 0.025
-    SPRINGINESS = 0.25
+    SPRINGINESS = 0.5
     REST = 0.5
 
     @classmethod
     def fixed_points(cls):
         return [
-            (5 + sympy.sin(t * 2), 9)
+            (5, 9)
         ]
 
     @classmethod
@@ -362,9 +363,39 @@ class Rope(Simulation):
         ]
 
 
-class DoubleRope(Simulation):
-    MASS = 0.0010
+class NoGravityRope(Simulation):
+    MASS = 0.025
     SPRINGINESS = 0.5
+    REST = 0.5
+
+    GRAVITY = 0.0
+
+    @classmethod
+    def fixed_points(cls):
+        return [
+            (5, 5)
+        ]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((5, 4), (1, 0), cls.MASS),
+            ((5, 3), (2, 1), cls.MASS),
+            ((5, 2), (4, 2), cls.MASS),
+        ]
+
+    @classmethod
+    def springs(cls):
+        return [
+            (-1, 0, cls.SPRINGINESS, cls.REST),
+            (0, 1, cls.SPRINGINESS, cls.REST),
+            (1, 2, cls.SPRINGINESS, cls.REST),
+        ]
+
+
+class DoubleRope(Simulation):
+    MASS = 0.001
+    SPRINGINESS = 5
     REST = 0.2
 
     @classmethod
@@ -381,22 +412,88 @@ class DoubleRope(Simulation):
             [(i, i + 1, cls.SPRINGINESS, cls.REST) for i in range(28)]
 
 
+class FrictionDoubleRope(Simulation):
+    MASS = 0.005
+    SPRINGINESS = 5
+    REST = 0.2
+
+    DAMPING = 0.01
+
+    @classmethod
+    def fixed_points(cls):
+        return [(2, 8), (8, 8)]
+
+    @classmethod
+    def points(cls):
+        return [((2 + 0.2 * i, 8), (0, 0), cls.MASS) for i in range(1, 30)]
+
+    @classmethod
+    def springs(cls):
+        return [(-1, 0, cls.SPRINGINESS, cls.REST), (28, -2, cls.SPRINGINESS, cls.REST)] + \
+            [(i, i + 1, cls.SPRINGINESS, cls.REST) for i in range(28)]
+
+
 class Cloth(Simulation):
-    MASS = 0.001
+    MASS = 0.003
     SPRINGINESS = 0.2
     REST = 1
+
+    DAMPING = 0.01
 
     @classmethod
     def fixed_points(cls):
         return [
-            (2, 8),
-            (8, 8),
+            (2, 9),
+            (8, 9),
         ]
 
     @classmethod
     def points(cls):
         return [
-            ((2 + i, 8 - j), (0, 0), cls.MASS)
+            ((2 + i, 9 - j), (0, 0), cls.MASS / (8 - j))
+            for i in range(0, 7)
+            for j in range(0, 6)
+            if (i != 0 and i != 6) or j != 0
+        ]
+
+    @classmethod
+    def springs(cls):
+        return [
+            (-1, 0, cls.SPRINGINESS, cls.REST),
+            (-1, 5, cls.SPRINGINESS, cls.REST),
+            (-2, 29, cls.SPRINGINESS, cls.REST),
+            (-2, 35, cls.SPRINGINESS, cls.REST),
+        ] + [
+            (i, i + 1, cls.SPRINGINESS, cls.REST)
+            for i in range(39)
+            if i % 6 != 4
+        ] + [
+            (i, i + 5 + (i < 30), cls.SPRINGINESS, cls.REST)
+            for i in range(35)
+            if i != 29
+        ]
+
+
+class MovingCloth(Simulation):
+    MASS = 0.003
+    SPRINGINESS = 0.2
+    REST = 1
+
+    DAMPING = 0.01
+
+    @classmethod
+    def fixed_points(cls):
+        s = 1 / (1 + sympy.exp(10 - t))
+
+        return [
+            (2 + sympy.sin(t) * s, 9),
+            (8 + sympy.sin(t) * s, 9),
+        ]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((2 + i, 9 - j), (0, 0), cls.MASS / (8 - j))
             for i in range(0, 7)
             for j in range(0, 6)
             if (i != 0 and i != 6) or j != 0
@@ -458,12 +555,54 @@ class Building(Simulation):
         ]
 
 
+class MovingBuilding(Simulation):
+    SPRINGINESS = 100
+    MASS = 0.05
+
+    H = 8
+
+    @classmethod
+    def fixed_points(cls):
+        return [(i + 3 * sympy.sin(t * sympy.atan(sympy.cos(t))), 0) for i in range(11)]
+
+    @classmethod
+    def points(cls):
+        return [
+            ((i, j), (0, 0), cls.MASS / j)
+            for i in range(3, 8)
+            for j in range(1, cls.H)
+        ]
+
+    @classmethod
+    def springs(cls):
+        points = cls.points()
+        return [
+            (-4 - i, (cls.H - 1) * i, cls.SPRINGINESS, 1)
+            for i in range(5)
+        ] + [
+            (-4 - i, (cls.H - 1) * (i + 1), cls.SPRINGINESS, 2 ** .5)
+            for i in range(4)
+        ] + [
+            (-5 - i, (cls.H - 1) * i, cls.SPRINGINESS, 2 ** .5)
+            for i in range(4)
+        ] + [
+            (i, j, cls.SPRINGINESS, d)
+            for i, (a, _, _) in enumerate(points)
+            for j, (b, _, _) in enumerate(points)
+            if i < j and (d := ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5) < 1.5
+        ]
+
+
 if __name__ == '__main__':
     sims = {
         'rope': Rope,
+        'no-gravity-rope': NoGravityRope,
         'double-rope': DoubleRope,
+        'friction-double-rope': FrictionDoubleRope,
         'cloth': Cloth,
+        'moving-cloth': MovingCloth,
         'building': Building,
+        'moving-building': MovingBuilding,
     }
     if len(sys.argv) == 1:
         print("missing simulation name")
